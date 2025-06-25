@@ -101,3 +101,65 @@ digit 4 ,
 - rule 4 , filter ID : 104 , accept Data Frame , Extended ID , compare RTR(Data frame or Remote frame), NOT compare IDE(Standard ID or Extended ID)
 
 ![image](https://github.com/released/Sample_Project_RH850_S1_CAN_FD_RX_Interrupt_With_Rule/blob/main/rx_interrupt_rule_4_ID_104.jpg)
+
+
+7. How to initial interrupt function , 
+
+- Add function declare in r_cg_intvector.c , need to replace when code generage EACH TIMES
+
+SEARCH : extern void eiint23(void);
+
+replace with : extern void can_rx_fifo_interrupt(void);
+
+```c
+/* CAN receive FIFO interrupt; */
+extern void can_rx_fifo_interrupt(void);
+/* CAN0 error interrupt; */
+extern void eiint24(void);
+```
+
+SEARCH : (void *)eiint23,
+
+replace with : (void *)can_rx_fifo_interrupt,
+
+```c
+/* CAN receive FIFO interrupt; */
+(void *)can_rx_fifo_interrupt,
+/* CAN0 error interrupt; */
+(void *)eiint24,
+```
+
+- Add interrupt handler declare with irq number 
+
+```c
+#pragma interrupt can_rx_fifo_interrupt(enable=false, channel=23, fpu=true, callt=false)
+void can_rx_fifo_interrupt(void)
+{
+    /* Start user code for can_rx_fifo_interrupt. Do not edit comment generated here */
+    can_rx_interrupt_cbk();
+    /* End user code. Do not edit comment generated here */
+}
+```
+
+- Add interrupt initial function , 
+
+```c
+
+void R_CANFD_Interrupt_Control_Init(void)
+{
+	// 23   ICRCANGRECC0  	FFFE EA2E H   INTRCANGRECC0  	CAN receive FIFO interrupt
+
+    /*INTRCANGRECC0 : CAN CHANNEL RX FIFO interrupt*/
+
+    INTC1.ICRCANGRECC0.BIT.CTRCANGRECC0 = 1;
+    INTC1.ICRCANGRECC0.BIT.RFRCANGRECC0 = _INT_REQUEST_NOT_OCCUR;        
+    INTC1.ICRCANGRECC0.BIT.MKRCANGRECC0 = _INT_PROCESSING_ENABLED;
+    INTC1.ICRCANGRECC0.BIT.TBRCANGRECC0 = _INT_TABLE_VECTOR; //select table interrupt
+
+    INTC1.ICRCANGRECC0.BIT.P3RCANGRECC0 = 1;
+    INTC1.ICRCANGRECC0.BIT.P2RCANGRECC0 = 1;
+    INTC1.ICRCANGRECC0.BIT.P1RCANGRECC0 = 1;
+    INTC1.ICRCANGRECC0.BIT.P0RCANGRECC0 = 1;
+}
+```
+

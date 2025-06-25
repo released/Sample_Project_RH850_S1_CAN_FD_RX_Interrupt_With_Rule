@@ -533,8 +533,11 @@ void can_rx_fifo_buf_int_check(CAN_REG_TYP * can,CAN_BUS_HANDLE *p, CAN_RX_FIFO_
 
     if(CAN_REG_READ(rfsts[rfi_number].UINT32,CAN_REG_BIT8,CAN_REG_LENGTH_8)!=0)
     {
+
         can_fd_receive_fifo_buffer_decode(can,rfi_number);
+
         can_fd_receive_fifo_buffer_status(can,rfi_number);
+
 
         CAN_REG_CLR(rfsts[rfi_number].UINT32,CAN_REG_BIT3,CAN_REG_LENGTH_1);   //RFIF
 
@@ -860,14 +863,18 @@ static void can_rrt_set(CAN_REG_TYP * can,
         p->rrt_handle[q].id.bit.RTR=0;
         
         //RCFDCnCFDGAFLMj
+        #if defined (CAN_USE_RX_RULE)
         p->rrt_handle[q].mask.bit.MID=STANDARD_ID_BIT_IS_COMPARED;
         // p->rrt_handle[q].mask.bit.MID=EXTEND_ID_BIT_IS_COMPARED;//The corresponding ID bit is compared
-        // p->rrt_handle[q].mask.bit.MID=ALL_ID_BIT_IS_NOT_COMPARED;//The corresponding ID bit is not compared
+        #else
+        p->rrt_handle[q].mask.bit.MID=ALL_ID_BIT_IS_NOT_COMPARED;//The corresponding ID bit is not compared
+        #endif
         p->rrt_handle[q].mask.bit.MIDE=0;
         p->rrt_handle[q].mask.bit.MRTR=0;
 
         //RCFDCnCFDGAFLP0_j
-        p->rrt_handle[q].ptr0.bit.RMDP=0;    //Set the receive buffer number to store received message.
+        // p->rrt_handle[q].ptr0.bit.RMDP=0;    //Set the receive buffer number to store received message.
+        p->rrt_handle[q].ptr0.bit.RMDP=(rule + q)->GAFLRMDP;    //Set the receive buffer number to store received message.
         // p->rrt_handle[q].ptr0.bit.RMV=0;     //Receive Buffer disable
         p->rrt_handle[q].ptr0.bit.RMV=1;
         p->rrt_handle[q].ptr0.bit.PTR=0;     //Receive Rule Label (additional infomation 12bit)
@@ -875,8 +882,7 @@ static void can_rrt_set(CAN_REG_TYP * can,
 
         //RCFDCnCFDGAFLP1_j
         //disable FIFO
-        // p->rrt_handle[q].ptr1.bit.FDPx=(0x1<<can_bus_parameter_ch1.CAN_RX_FIFO_BUFFER_NUM);        //Receive FIFO Buffer x Select
-        p->rrt_handle[q].ptr1.bit.FDPx=0x1U;   //Receive FIFO Buffer 0 Select
+        p->rrt_handle[q].ptr1.bit.FDPx=(rule + q)->GAFLFDP_x;        //Receive FIFO Buffer x Select
         
         p->rrt_handle[q].ptr1.bit.FDPk=0;       //Transmit/Receive FIFO Buffer k Select
     }
@@ -1047,14 +1053,14 @@ static void can_rrt_set(CAN_REG_TYP * can,
         p->rrt_handle[q].mask.bit.MRTR=1;
 
         //RCFDCnCFDGAFLP0_j
-        p->rrt_handle[q].ptr0.bit.RMDP=CAN_RX_FIFO_BUFFER_NUMBER0;           //Set the receive buffer number to store received message.
+        p->rrt_handle[q].ptr0.bit.RMDP=0;           //Set the receive buffer number to store received message.
         p->rrt_handle[q].ptr0.bit.RMV=1;            //0: No receive buffer is used.,1: A receive buffer is used. 
         p->rrt_handle[q].ptr0.bit.PTR=0x5555;       //Receive Rule Label (additional infomation 12bit)
         p->rrt_handle[q].ptr0.bit.DLC= (unsigned char)CAN_DLC_DISABLE_CHECK;
         
         //RCFDCnCFDGAFLP1_j
         //enable RX FIFO
-        p->rrt_handle[q].ptr1.bit.FDPx=(0x1<<CAN_RX_FIFO_BUFFER_NUMBER0);     //Receive FIFO Buffer 0 Selected(select by bit filed)  / one FIFO buffer depth 128 message
+        p->rrt_handle[q].ptr1.bit.FDPx=(0x1<<can_bus_parameter_ch1.CAN_RX_FIFO_BUFFER_NUM);     //Receive FIFO Buffer 0 Selected(select by bit filed)  / one FIFO buffer depth 128 message
         p->rrt_handle[q].ptr1.bit.FDPk=0;                                     //Transmit/Receive FIFO Buffer disable
     }
     {
@@ -1307,8 +1313,6 @@ static void can_normal_mode_set(CAN_REG_TYP * can,
 
         while(CAN_REG_READ(can->CFDGSTS.UINT32,CAN_REG_BIT2,CAN_REG_LENGTH_1)!=0);  //GSLPSTS
 
-        // R_CANFD_Global_error_Interrupt_Init();
-
         //===========only for F1KM-S1 R7F701587x Kit init.===================
         //CAN_REG_SET(can->CFDGRMCFG.UINT32,CAN_REG_BIT0,CAN_REG_LENGTH_1);   //set as FD mode  
         //===================================================================
@@ -1518,7 +1522,7 @@ void R_CLKC_SetRscanClockDomain(uint32_t RscanModuleClockDomain, uint32_t RscanC
     need to replace when code generage EACH TIMES
 */
 // TODO : 
-// @ r_cg_invector.c
+// @ r_cg_intvector.c
 
 // [SEARCH1]
 // /* CAN receive FIFO interrupt; */
@@ -2024,163 +2028,6 @@ static void can_tx_normal_buffer1_set(CAN_BUS_HANDLE *p,CAN_FD_MODE_e mode,unsig
     counter++;
 }
 
-
-//Self-Test Mode Setting Procedure 
-void can_self_test_mode(CAN_REG_TYP * can , unsigned char en)
-{   
-    /*
-        [Channel halt mode]
-        Set the CHMDC[1:0] bits 
-        in the RCFDCnCFDCmCTR register to 10 B .    
-
-        Is CHLTSTS flag in the              ^
-        RCFDCnCFDCmSTS register 1           | NO
-        (in channel halt mode)?         -----
-        |
-        V YES
-        [Communication test mode is enabled.Self-test mode 0 (10 B ) or 1 (11 B ) is selected.]
-        Set CTME bit in the RCFDCnCFDCmCTR register to 1.
-        Set the CTMS[1:0] bits to 10 B  or 11 B .
-        |
-        V
-        [Channel communication mode]
-        Set the CHMDC[1:0] bits 
-        in the RCFDCnCFDCmCTR register to 00 B .
-        |
-        V                                       ^
-        Are all CSLPSTS, CHLTSTS, and           | NO
-        CRSTSTS flags in the RCFDCnCFDCmSTS -----
-        register 0?
-        |
-        V YES
-        Perform self-test on channel m.
-        |
-        V
-        [Channel halt mode]
-        Set the CHMDC[1:0] bits 
-        in the RCFDCnCFDCmCTR register to 10 B .
-        |
-        V
-        Is CHLTSTS flag in the                  ^
-        RCFDCnCFDCmSTS register 1               | NO
-        (in channel halt mode)?             -----
-        |
-        V YES
-        [Communication test mode disabled.Standard test mode]
-        Set CTME bit in the RCFDCnCFDCmCTR register to 0.
-        Set the CTMS[1:0] bits to 00 B .        
-    
-    */
-
-    volatile struct CHANNEL_SET *cst= (volatile struct CHANNEL_SET *)(&can->CFDC0NCFG.UINT32);
-    CAN_CHANNEL_SEL_e channel = can_bus_parameter_ch1.CAN_CH;
-
-    switch(en)
-    {
-        case 1:
-
-            /* ==== CAN RAM initialization ==== */
-            // while(CAN_REG_READ(can->CFDGSTS.UINT32,CAN_REG_BIT3,0x1U)!=0);  //GRAMINIT
-            while(CAN_REG_READ(cst[channel].CxSTS.UINT32,CAN_REG_BIT3,0x1U)!=0);  //GRAMINIT
-            /*
-                GRAMINIT  CAN RAM Initialization Status Flag 
-                0: CAN RAM initialization is completed. 
-                1: CAN RAM initialization is ongoing.    
-            */
-
-            // CAN_REG_CLR(cst[channel].CxCTR.UINT32,CAN_REG_BIT2,CAN_REG_LENGTH_1);   //CSLPR
-            // /*
-            //     CSLPR  Channel Stop Mode 
-            //     0: Other than channel stop mode 
-            //     1: Channel stop mode             
-            // */
-
-            CAN_REG_CLR(cst[channel].CxCTR.UINT32,CAN_REG_BIT0,CAN_REG_LENGTH_2); //CHMDC
-            CAN_REG_SET(cst[channel].CxCTR.UINT32,CAN_REG_BIT0,CAN_CH_HALT_MODE); 
-            /*
-                CHMDC[1:0]  Mode Select   
-                            b1      b0 
-                            0        0: Channel communication mode 
-                            0        1: Channel reset mode 
-                            1        0: Channel halt mode 
-                            1        1: Setting prohibited     
-            */
-
-            // while (CAN_REG_READ(cst[channel].CxSTS.UINT32,CAN_REG_BIT1,0x1U)==0);   //CHLTSTS
-            if (CAN_REG_READ(cst[channel].CxSTS.UINT32,CAN_REG_BIT1,0x1U)!=0)
-            {
-                CAN_REG_CLR(cst[channel].CxSTS.UINT32,CAN_REG_BIT1,CAN_REG_LENGTH_1);
-                while (CAN_REG_READ(cst[channel].CxSTS.UINT32,CAN_REG_BIT1,0x1U)!=0);
-            }
-            /*
-                CHLTSTS  Channel Halt Status Flag 
-                0: Not in channel halt mode 
-                1: In channel halt mode    
-            */
-
-            CAN_REG_CLR(cst[channel].CxCTR.UINT32,CAN_REG_BIT24,CAN_REG_LENGTH_1); //CTME
-            CAN_REG_SET(cst[channel].CxCTR.UINT32,CAN_REG_BIT24,CAN_REG_LENGTH_1); 
-            /*
-                CTME  Communication Test Mode Enable 
-                0: Communication test mode is disabled. 
-                1: Communication test mode is enabled.     
-            */
-
-            CAN_REG_CLR(cst[channel].CxCTR.UINT32,CAN_REG_BIT25,CAN_REG_LENGTH_2); //CTMS
-            CAN_REG_SET(cst[channel].CxCTR.UINT32,CAN_REG_BIT25,CAN_COMM_SELF_TEST_MODE_1); 
-            /*
-                CTMS[1:0]  Communication Test Mode Select   
-                            b26      b25 
-                            0        0: Standard test mode 
-                            0        1: Listen-only mode 
-                            1        0: Self-test mode 0 (external loopback mode) 
-                            1        1: Self-test mode 1 (internal loopback mode) 
-            */
-
-            CAN_REG_CLR(cst[channel].CxCTR.UINT32,CAN_REG_BIT0,CAN_REG_LENGTH_2); //CHMDC
-            CAN_REG_SET(cst[channel].CxCTR.UINT32,CAN_REG_BIT0,CAN_CH_COMM_MODE); 
-
-            while(CAN_REG_READ(cst[channel].CxSTS.UINT32,CAN_REG_BIT2,0x1U)==1);//CSLPSTS
-            /*
-                CSLPSTS  Channel Stop Status Flag 
-                0: Not in channel stop mode 
-                1: In channel stop mode    
-            */
-
-            while (CAN_REG_READ(cst[channel].CxSTS.UINT32,CAN_REG_BIT1,0x1U)==1);   //CHLTSTS
-            /*
-                CHLTSTS  Channel Halt Status Flag 
-                0: Not in channel halt mode 
-                1: In channel halt mode    
-            */
-
-            while(CAN_REG_READ(cst[channel].CxSTS.UINT32,CAN_REG_BIT0,0x1U)!=1);  //CRSTSTS
-            /*
-                CRSTSTS  Channel Reset Status Flag 
-                0: Not in channel reset mode 
-                1: In channel reset mode    
-            */        
-
-
-            break;
-
-        case 0:
-
-            CAN_REG_CLR(cst[channel].CxCTR.UINT32,CAN_REG_BIT0,CAN_REG_LENGTH_2); //CHMDC
-            CAN_REG_SET(cst[channel].CxCTR.UINT32,CAN_REG_BIT0,CAN_CH_HALT_MODE); 
-
-            while (CAN_REG_READ(cst[channel].CxSTS.UINT32,CAN_REG_BIT1,0x1U)==0);   //CHLTSTS
-
-            CAN_REG_CLR(cst[channel].CxCTR.UINT32,CAN_REG_BIT24,CAN_REG_LENGTH_1); //CTME
-            // CAN_REG_SET(cst[channel].CxCTR.UINT32,CAN_REG_BIT24,CAN_REG_LENGTH_1); 
-
-            CAN_REG_CLR(cst[channel].CxCTR.UINT32,CAN_REG_BIT25,CAN_REG_LENGTH_2); //CTMS
-            // CAN_REG_SET(cst[channel].CxCTR.UINT32,CAN_REG_BIT25,CAN_COMM_SELF_TEST_MODE_1); 
-
-            break;
-    }
-
-}
 
 unsigned char can_global_error_interrupt_cbk(CAN_REG_TYP * can)
 {
